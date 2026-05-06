@@ -1,18 +1,23 @@
-name: CI
+name: pr-build
+
 on:
   pull_request:
     branches: [main]
+  merge_group:
+
 permissions:
   contents: read
+
 jobs:
-  build:
-    uses: RiddimSoftware/riddim-release/.github/workflows/swift-package-build.yml@main
-  success:
-    needs: [build]
-    runs-on: ubuntu-latest
-    if: always()
+  pr-build:
+    name: pr-build
+    runs-on: macos-15
+    timeout-minutes: 20
     steps:
-      - run: |
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            exit 1
-          fi
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: swift build 2>&1 | tee /tmp/swift-build.log; exit "${PIPESTATUS[0]}"
+
+      - name: Test
+        run: swift test 2>&1 | tee /tmp/swift-test.log; exit "${PIPESTATUS[0]}"
