@@ -1,0 +1,59 @@
+{
+  "repo": "ExampleOrg/ExampleApp",
+  "pr": 123,
+  "platform": "ios",
+  "runner": "simctl",
+  "ios": {
+    "project": "ios/ExampleApp.xcodeproj",
+    "scheme": "ExampleApp",
+    "bundle_id": "com.example.app",
+    "simulator": "iPhone 16 Pro Max",
+    "destination": "platform=iOS Simulator,name=iPhone 16 Pro Max"
+  },
+  "launch": {
+    "arguments": [
+      "--evidence-mode",
+      "-UIAnimationsDisabled",
+      "YES"
+    ],
+    "environment": {
+      "EXAMPLE_EVIDENCE_MODE": "1"
+    }
+  },
+  "output_directory": "docs/build-evidence/pr-123",
+  "video": {
+    "enabled": true,
+    "name": "pr-flow"
+  },
+  "steps": [
+    {
+      "name": "launch app",
+      "kind": "launch"
+    },
+    {
+      "name": "wait for launch state",
+      "kind": "wait",
+      "seconds": 2
+    },
+    {
+      "name": "capture launch screen",
+      "kind": "screenshot",
+      "path": "launch.png"
+    },
+    {
+      "name": "open changed route",
+      "kind": "openURL",
+      "url": "exampleapp://evidence/changed-route"
+    },
+    {
+      "name": "wait for changed route",
+      "kind": "wait",
+      "seconds": 2
+    },
+    {
+      "name": "capture changed route",
+      "kind": "screenshot",
+      "path": "changed-route.png"
+    }
+  ]
+}
