@@ -48,47 +48,96 @@ final class ArchitectureBoundaryTests: XCTestCase {
             encoding: .utf8
         )
 
-        guard let capturePRCase = switchCase(named: "capture-pr", in: cliSource) else {
-            return
-        }
+        let routerBranch = try XCTUnwrap(
+            capturePRRouterBranch(in: cliSource),
+            """
+            Architecture test could not locate capture-pr routing in EvidenceCLI.swift. \
+            Keep this scanner aligned with the real command router so capture-pr policy cannot bypass the boundary guard.
+            """
+        )
+        let dispatchBoundary = try XCTUnwrap(
+            functionBody(named: "capturePullRequest", in: cliSource),
+            """
+            Architecture test could not locate capturePullRequest in EvidenceCLI.swift. \
+            capture-pr must route through a named dispatch boundary before invoking PR evidence use cases.
+            """
+        )
 
-        let policyMarkers = [
-            "worktree",
-            "baseRef",
-            "headRef",
-            "pull_request",
-            "github",
+        let routerPolicyMarkers = [
+            "GitCLIRepositoryPreparer",
+            "GitHubCLIPullRequestMetadataProvider",
+            "CapturePullRequestEvidence(",
+            "ResolvePullRequestComparison",
+            "PrepareComparisonWorktrees",
+            "runner.run(",
+            "Process(",
             "xcodebuild",
             "simctl",
             "xcresulttool"
         ]
-        let lowercasedCase = capturePRCase.lowercased()
-        let offenders = policyMarkers.filter { lowercasedCase.contains($0.lowercased()) }
+        let routerOffenders = routerPolicyMarkers.filter { routerBranch.contains($0) }
 
         XCTAssertTrue(
-            offenders.isEmpty,
+            routerOffenders.isEmpty,
             """
             EvidenceCLI.swift must only parse and dispatch the capture-pr command. \
             PR evidence orchestration policy belongs in named use-case/application files documented in \
             docs/architecture/use-case-catalog.md, behind ports for git, GitHub, Xcode, simulator, and filesystem work. \
-            Move these policy details out of the CLI router: \(offenders.joined(separator: ", ")).
+            Move these policy details out of the CLI router: \(routerOffenders.joined(separator: ", ")).
+            """
+        )
+
+        let rawDetailMarkers = [
+            "runner.run(",
+            "Process(",
+            "\"worktree\"",
+            "\"checkout\"",
+            "\"pr\", \"view\"",
+            "api.github.com",
+            "GITHUB_",
+            "pull_request",
+            "xcodebuild",
+            "simctl",
+            "xcresulttool"
+        ]
+        let dispatchOffenders = rawDetailMarkers.filter {
+            dispatchBoundary.range(of: $0, options: [.caseInsensitive]) != nil
+        }
+
+        XCTAssertTrue(
+            dispatchOffenders.isEmpty,
+            """
+            capturePullRequest in EvidenceCLI.swift must remain a thin dispatch boundary. \
+            Raw Git, GitHub, Xcode, simulator, and filesystem policy belongs in named use-case/application files \
+            documented in docs/architecture/use-case-catalog.md and behind ports/adapters. \
+            Move these policy details out of the CLI dispatch boundary: \(dispatchOffenders.joined(separator: ", ")).
             """
         )
     }
 
     func testPREvidenceValueObjectsDoNotImportFrameworkOrProcessDetails() throws {
         let root = try packageRoot()
+        let valueObjectFiles = Set([
+            "Sources/EvidenceCLIKit/PRChangeEvidenceContracts.swift",
+            "Sources/EvidenceCLIKit/PullRequestComparison.swift"
+        ])
         let candidateFiles = try swiftFiles(under: root.appendingPathComponent("Sources"))
             .filter { url in
+                let relativePath = url.path.replacingOccurrences(of: root.path + "/", with: "")
                 let path = url.path
                 let name = url.deletingPathExtension().lastPathComponent
-                return path.contains("/PullRequestEvidence/")
+                return valueObjectFiles.contains(relativePath)
+                    || path.contains("/PullRequestEvidence/")
                     || path.contains("/PREvidence/")
                     || name.contains("PullRequest")
                     || name.contains("Comparison")
                     || name.contains("EvidenceRevision")
                     || name.contains("EvidenceReport")
             }
+        XCTAssertTrue(
+            candidateFiles.contains { $0.lastPathComponent == "PRChangeEvidenceContracts.swift" },
+            "PR evidence value-object boundary coverage must include PRChangeEvidenceContracts.swift."
+        )
 
         let bannedImports = [
             "XCTest",
@@ -99,7 +148,8 @@ final class ArchitectureBoundaryTests: XCTestCase {
             "XCUIApplication",
             "Process()",
             "ProcessCommandRunner",
-            "simctl",
+            "\"simctl\"",
+            "Simctl",
             "xcodebuild",
             "xcresulttool",
             "gh pr",
@@ -154,15 +204,40 @@ final class ArchitectureBoundaryTests: XCTestCase {
         return String(tail[..<end])
     }
 
-    private func switchCase(named command: String, in source: String) -> String? {
-        guard let start = source.range(of: "case \"\(command)\":") else {
+    private func capturePRRouterBranch(in source: String) -> String? {
+        guard let start = source.range(of: "if first == \"capture-pr\" {") else {
             return nil
         }
         let tail = source[start.lowerBound...]
-        let end = tail.range(of: "\n        case ", options: [], range: tail.index(after: start.lowerBound)..<tail.endIndex)?.lowerBound
-            ?? tail.range(of: "\n        default:", options: [], range: tail.index(after: start.lowerBound)..<tail.endIndex)?.lowerBound
+        let end = tail.range(of: "\n\n        let config = try loadConfig()", options: [], range: tail.index(after: start.lowerBound)..<tail.endIndex)?.lowerBound
             ?? tail.endIndex
         return String(tail[..<end])
+    }
+
+    private func functionBody(named name: String, in source: String) -> String? {
+        guard let start = source.range(of: "private func \(name)") else {
+            return nil
+        }
+        let openBrace = source[start.lowerBound...].firstIndex(of: "{")
+        guard let openBrace else {
+            return nil
+        }
+
+        var depth = 0
+        var index = openBrace
+        while index < source.endIndex {
+            let character = source[index]
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(source[start.lowerBound...index])
+                }
+            }
+            index = source.index(after: index)
+        }
+        return nil
     }
 
     private func swiftFiles(under directory: URL) throws -> [URL] {
