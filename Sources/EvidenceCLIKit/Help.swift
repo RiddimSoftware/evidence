@@ -15,13 +15,15 @@ public enum Help {
       capture-evidence      Capture a one-shot build evidence screenshot.
       upload-screenshots    Upload screenshots to App Store Connect.
       capture-web           Capture full-page Playwright screenshots at configured viewport sizes.
+      capture-pr            Prepare before/after worktrees for pull request evidence.
 
     Configuration:
-      Commands read .evidence.toml from the current directory. Required fields:
-      scheme, bundle_id, simulator_udid.
+      Most capture commands read .evidence.toml from the current directory.
+      Required iOS fields: scheme, bundle_id, simulator_udid.
 
     Examples:
       evidence capture-evidence --ticket APP-123
+      evidence capture-pr --repo RiddimSoftware/app --pr 123 --plan .evidence/pr-home.json --output docs/evidence/pr-123
       evidence resize --input raw.png --target 6.9 --output app-store.png
       evidence upload-screenshots --dry-run
     """
@@ -180,6 +182,31 @@ public enum Help {
       evidence capture-web --comment-on-pr true
     """
 
+    public static let capturePR = """
+    evidence capture-pr --repo <owner/repo> --pr <number> --plan <json> --output <dir> [--before-ref <ref>] [--after-ref <ref>]
+
+    Resolves pull request before/after revisions, writes a manifest, and
+    prepares two isolated Git worktrees:
+
+      <output>/worktrees/before-<shortsha>
+      <output>/worktrees/after-<shortsha>
+      <output>/manifest.json
+
+    Defaults:
+      Open PRs:   before = current base SHA, after = current head SHA
+      Merged PRs: before = first parent of merge commit, after = merge commit
+
+    Explicit refs override defaults and are resolved to commits before
+    worktrees are created.
+
+    Requires:
+      gh
+      git
+
+    Example:
+      evidence capture-pr --repo RiddimSoftware/epac --pr 479 --plan .evidence/pr-home.json --output docs/evidence/pr-479
+    """
+
     public static func text(for command: String) throws -> String {
         switch command {
         case "capture-screenshots":
@@ -196,6 +223,8 @@ public enum Help {
             uploadScreenshots
         case "capture-web":
             captureWeb
+        case "capture-pr":
+            capturePR
         default:
             throw CLIError.usage("Unknown command '\(command)'. Run `evidence --help`.")
         }

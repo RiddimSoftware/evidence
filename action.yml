@@ -7,7 +7,7 @@ branding:
 
 inputs:
   subcommand:
-    description: 'evidence subcommand to run (capture-screenshots, capture-evidence, capture-web, resize, render-marketing, record-preview, diff, upload-screenshots, help).'
+    description: 'evidence subcommand to run (capture-screenshots, capture-evidence, capture-pr, capture-web, resize, render-marketing, record-preview, diff, upload-screenshots, help).'
     required: true
   platform:
     description: 'Target platform. Use "ios" (default) for iOS simulator captures or "web" to capture Playwright web screenshots. When "web", Node.js 20 and the Playwright Chromium browser are installed automatically.'
@@ -122,7 +122,7 @@ runs:
 
     - name: Cache Homebrew downloads
       id: brew-cache
-      if: ${{ inputs.platform != 'web' }}
+      if: ${{ inputs.platform != 'web' && inputs.subcommand != 'capture-pr' }}
       uses: actions/cache@v4
       with:
         # Cache the formula download tarballs and HOMEBREW_API metadata. We
@@ -137,7 +137,7 @@ runs:
         key: evidence-brew-${{ runner.os }}-${{ runner.arch }}-imagemagick-ffmpeg-v2
 
     - name: Install ImageMagick and ffmpeg
-      if: ${{ inputs.platform != 'web' }}
+      if: ${{ inputs.platform != 'web' && inputs.subcommand != 'capture-pr' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -183,7 +183,7 @@ runs:
 
     - name: Boot simulator
       id: simulator
-      if: ${{ inputs.platform != 'web' }}
+      if: ${{ inputs.platform != 'web' && inputs.subcommand != 'capture-pr' }}
       shell: bash
       env:
         DEVICE_NAME: ${{ inputs.simulator }}
@@ -246,13 +246,15 @@ runs:
         fi
 
         config_path="${EVIDENCE_CONFIG:-.evidence.toml}"
-        if [ ! -f "${config_path}" ]; then
-          echo "::error::Could not find evidence config at '${config_path}'. Pass 'config:' or commit a .evidence.toml."
-          exit 1
+        if [ "${subcommand}" != "capture-pr" ]; then
+          if [ ! -f "${config_path}" ]; then
+            echo "::error::Could not find evidence config at '${config_path}'. Pass 'config:' or commit a .evidence.toml."
+            exit 1
+          fi
+          # The CLI reads .evidence.toml from the working directory.
+          config_dir="$(cd "$(dirname "${config_path}")" && pwd)"
+          cd "${config_dir}"
         fi
-        # The CLI reads .evidence.toml from the working directory.
-        config_dir="$(cd "$(dirname "${config_path}")" && pwd)"
-        cd "${config_dir}"
 
         args=("${subcommand}")
         case "${subcommand}" in
@@ -284,9 +286,11 @@ runs:
           # Match CLI fallbacks: APPSTORE_SCREENSHOT_DIR, then the configured evidence_dir.
           if [ -n "${APPSTORE_SCREENSHOT_DIR:-}" ]; then
             resolved_output_dir="${APPSTORE_SCREENSHOT_DIR}"
-          else
+          elif [ -f "${config_path}" ]; then
             resolved_output_dir="$(awk -F '[ =]+' '/^evidence_dir/{gsub(/"/,"",$2); print $2; exit}' "${config_path}")"
             resolved_output_dir="${resolved_output_dir:-docs/build-evidence}"
+          else
+            resolved_output_dir="${EVIDENCE_OUTPUT_DIR_INPUT:-docs/build-evidence}"
           fi
         fi
 

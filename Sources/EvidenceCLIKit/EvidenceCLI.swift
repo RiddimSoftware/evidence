@@ -11,6 +11,7 @@ public struct EvidenceCLI {
     /// Directory used for the xcresult cache when
     /// `xcresult_keep_full_bundle = false`. Defaults to `~/.evidence/cache`.
     public var cacheDirectory: URL
+    public var clock: any EvidenceClock
 
     public init(
         fileManager: FileManager = .default,
@@ -22,7 +23,8 @@ public struct EvidenceCLI {
         httpClient: HTTPClient = URLSessionHTTPClient(),
         cacheDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".evidence", isDirectory: true)
-            .appendingPathComponent("cache", isDirectory: true)
+            .appendingPathComponent("cache", isDirectory: true),
+        clock: any EvidenceClock = SystemEvidenceClock()
     ) {
         self.fileManager = fileManager
         self.runner = runner
@@ -32,6 +34,7 @@ public struct EvidenceCLI {
         self.toolPaths = toolPaths
         self.httpClient = httpClient
         self.cacheDirectory = cacheDirectory
+        self.clock = clock
     }
 
     public static func main() {
@@ -71,6 +74,11 @@ public struct EvidenceCLI {
         let commandArguments = Array(arguments.dropFirst())
         if commandArguments.contains("--help") || commandArguments.contains("-h") {
             stdout(try Help.text(for: first))
+            return
+        }
+
+        if first == "capture-pr" {
+            try capturePullRequest(commandArguments)
             return
         }
 
@@ -589,6 +597,49 @@ public struct EvidenceCLI {
         ).upload(arguments: arguments, config: config, currentDirectory: currentDirectory)
     }
 
+    private func capturePullRequest(_ arguments: [String]) throws {
+        let repo = try option("repo", in: arguments)
+        let prValue = try option("pr", in: arguments)
+        guard let pr = Int(prValue), pr > 0 else {
+            throw CLIError.usage("Invalid value for --pr '\(prValue)'. Expected a positive pull request number.")
+        }
+        let planPath = try option("plan", in: arguments)
+        let outputDirectory = url(forPath: try option("output", in: arguments))
+        let beforeRef = optionValue("before-ref", in: arguments)
+        let afterRef = optionValue("after-ref", in: arguments)
+
+        let git = GitCLIRepositoryPreparer(
+            fileManager: fileManager,
+            runner: runner,
+            gitPath: toolPaths.git,
+            repositoryRoot: currentDirectory
+        )
+        let metadataProvider = GitHubCLIPullRequestMetadataProvider(
+            runner: runner,
+            ghPath: toolPaths.gh
+        )
+        let capture = CapturePullRequestEvidence(
+            resolver: ResolvePullRequestComparison(metadataProvider: metadataProvider, git: git),
+            worktreePreparer: PrepareComparisonWorktrees(git: git),
+            fileManager: fileManager,
+            clock: clock
+        )
+
+        try capture.execute(
+            CapturePullRequestEvidenceInput(
+                repo: repo,
+                pr: pr,
+                planPath: planPath,
+                outputDirectory: outputDirectory,
+                beforeRef: beforeRef,
+                afterRef: afterRef
+            )
+        )
+
+        stdout("Prepared PR comparison worktrees at \(outputDirectory.path)")
+        stdout("Wrote manifest at \(outputDirectory.appendingPathComponent("manifest.json").path)")
+    }
+
     private func markdownURL(for output: URL, config: EvidenceConfig) -> String? {
         guard let baseURL = config.repositoryRawBaseURL ?? inferredRepositoryRawBaseURL() else {
             return nil
@@ -665,19 +716,23 @@ public struct ToolPaths: Equatable {
     /// Path to the `node` binary. Used by `capture-web` to invoke the bundled
     /// Playwright script.
     public var node: String
+    /// Path to the GitHub CLI. Used by `capture-pr` to read pull request metadata.
+    public var gh: String
 
     public init(
         xcrun: String = "/usr/bin/xcrun",
         magick: String? = nil,
         ffmpeg: String? = nil,
         git: String = "/usr/bin/git",
-        node: String = "/usr/local/bin/node"
+        node: String = "/usr/local/bin/node",
+        gh: String? = nil
     ) {
         self.xcrun = xcrun
         self.magick = magick ?? ToolPaths.resolveBrewTool("magick")
         self.ffmpeg = ffmpeg ?? ToolPaths.resolveBrewTool("ffmpeg")
         self.git = git
         self.node = node
+        self.gh = gh ?? ToolPaths.resolveBrewTool("gh")
     }
 
     /// Searches common Homebrew install prefixes then falls back to `which`
