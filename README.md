@@ -12,6 +12,7 @@ It is an open-source Swift package and companion CLI for screenshots, App Store 
 - Describes screenshot flows as `ScreenshotPlan` scenes, anchors, launch hooks, and navigation actions.
 - Writes captures to predictable output directories for review, release checks, and App Store source material.
 - Provides CLI workflows for screenshot capture, build evidence, resizing, marketing renders, and preview video encoding.
+- Captures before/after pull request evidence with screenshots, videos, a manifest, and a markdown report reviewers can read.
 - Uploads App Store screenshots from the same captured directory with dry-run planning and dimension checks.
 - Keeps app-specific plans, copy, brand data, and generated artifacts in the consuming app repository.
 
@@ -150,7 +151,7 @@ Run the command that matches the workflow:
 ```sh
 evidence capture-screenshots
 evidence capture-evidence --ticket APP-123
-evidence capture-pr --repo RiddimSoftware/app --pr 123 --plan .evidence/pr-home.json --output docs/evidence/pr-123
+evidence capture-pr --repo ExampleOrg/ExampleApp --pr 123 --plan .evidence/pr-home.json --output docs/build-evidence/pr-123
 evidence resize --input raw.png --target 6.9 --output app-store.png
 evidence record-preview --input capture.mov --output preview.mp4 --trim-start 0 --trim-end 30
 evidence render-marketing --scene scene.json --svg scene.svg --output scene.png
@@ -168,6 +169,29 @@ Plan execution runs the same steps for the before and after revisions. For `runn
 For launch-only `runner = "simctl"` plans, Evidence resolves the configured `ios.simulator_udid` or `ios.simulator`, boots and waits for the device, applies stable UI settings when the local simulator supports them, uninstalls the app by default to clear container state, installs the built app, and launches it with the plan's launch arguments and environment. Launch environment is injected as `SIMCTL_CHILD_<KEY>` variables for local simulator compatibility. The simctl runner supports launch, wait-by-seconds, screenshot, openURL, startVideo, and stopVideo steps. Screenshots and videos are written under revision directories such as `<output>/before/home.png`, `<output>/after/home.png`, `<output>/before/flow.mov`, and `<output>/after/flow.mov`. Set `ios.preserve_simulator_state` to `true` only when the before/after comparison intentionally needs shared app container state.
 
 The manifest includes build records, step results, artifact paths, revision roles, media types, file sizes when the artifact exists, capture timestamps, and failure summaries. If a capture step fails, the command exits non-zero after writing the partial manifest so a report can still explain which revision and step failed.
+
+### Pull Request Change Evidence
+
+Use `capture-pr` when a reviewer needs to see what a pull request changed, not just that the app still launches. The command compares a before revision and an after revision, runs the same evidence plan against both, and writes:
+
+- before/after screenshots under `<output>/before/` and `<output>/after/`
+- optional before/after simulator videos
+- `manifest.json` with the selected SHAs, build commands, step results, artifact paths, and failures
+- `report.md` with a reviewer-oriented summary of the status and changed evidence
+
+Local example from an app repository after adapting the sample plan:
+
+```sh
+evidence capture-pr \
+  --repo ExampleOrg/ExampleApp \
+  --pr 123 \
+  --plan .evidence/pr-home.json \
+  --output docs/build-evidence/pr-123
+```
+
+The reusable sample plan lives at [`Examples/pr-change-evidence-plan.json`](Examples/pr-change-evidence-plan.json). Copy it into the consuming app repository and replace the placeholder repo, PR number, Xcode project or workspace, scheme, bundle ID, simulator, and URL values. Keep the generated `docs/build-evidence/pr-123` output out of the Evidence repository unless the consuming app intentionally commits its own evidence.
+
+`capture-pr` has two runner modes. `runner = "simctl"` is launch-only: it can launch the built app, open URLs, wait by seconds, take screenshots, and record start/stop video steps. Arbitrary UI actions such as tapping buttons, entering text, swiping, or waiting for accessibility elements require `runner = "xctest"` plus an app-side XCTest Evidence harness that reads `EVIDENCE_PLAN_PATH`, `EVIDENCE_OUTPUT_DIR`, and `EVIDENCE_REVISION_ROLE`. That harness belongs in the consuming app's UI test target because Evidence cannot know the app's fixtures, fake services, login state, or domain-specific navigation.
 
 Use raw capture when the screenshot should show the app exactly as it runs. Use `render-marketing` when the App Store asset needs a composed layout with headlines, badges, metrics, timelines, device framing, or source text around app imagery.
 
@@ -247,6 +271,28 @@ jobs:
         with:
           subcommand: capture-evidence
           ticket: ${{ github.event.pull_request.title }}
+          comment-on-pr: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**iOS — capture before/after PR evidence:**
+
+```yaml
+jobs:
+  capture-pr:
+    runs-on: macos-14
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: RiddimSoftware/evidence@v0
+        with:
+          subcommand: capture-pr
+          plan: .evidence/pr-home.json
+          output-dir: docs/build-evidence/pr-${{ github.event.pull_request.number }}
           comment-on-pr: 'true'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```

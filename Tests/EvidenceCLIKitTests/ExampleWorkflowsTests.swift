@@ -71,6 +71,43 @@ final class ExampleWorkflowsTests: XCTestCase {
         XCTAssertTrue(workflow.contains("path: ${{ steps.capture-pr.outputs['output-dir'] }}"))
     }
 
+    func testExampleCapturePRPlanIsParseable() throws {
+        let root = repositoryRoot()
+        let planURL = root.appendingPathComponent("Examples/pr-change-evidence-plan.json")
+
+        let plan = try PRChangeEvidencePlan.load(from: planURL)
+
+        XCTAssertEqual(plan.repo, "ExampleOrg/ExampleApp")
+        XCTAssertEqual(plan.platform, .ios)
+        XCTAssertGreaterThanOrEqual(plan.steps.count, 2, "Example PR evidence plan should demonstrate at least two capture steps.")
+    }
+
+    func testExampleWorkflowsPassActionlintWhenAvailable() throws {
+        let root = repositoryRoot()
+        let actionlint = try requireExecutableOnPath("actionlint")
+        let workflowsDirectory = root.appendingPathComponent("Examples/workflows")
+        let files = try FileManager.default.contentsOfDirectory(
+            at: workflowsDirectory,
+            includingPropertiesForKeys: nil
+        )
+            .filter { $0.pathExtension == "yml" || $0.pathExtension == "yaml" }
+            .sorted { $0.path < $1.path }
+
+        let process = Process()
+        process.executableURL = actionlint
+        process.arguments = files.map(\.path)
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let lintOutput = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertEqual(process.terminationStatus, 0, lintOutput)
+    }
+
     private func parseInputNames(from actionSource: String) -> Set<String> {
         var names: Set<String> = []
         var inInputs = false
@@ -145,5 +182,28 @@ final class ExampleWorkflowsTests: XCTestCase {
         url.deleteLastPathComponent()
         url.deleteLastPathComponent()
         return url
+    }
+
+    private func requireExecutableOnPath(_ name: String) throws -> URL {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["which", name]
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            throw XCTSkip("\(name) is not installed; action-self-test.yml runs this gate in CI.")
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let path = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !path.isEmpty else {
+            throw XCTSkip("\(name) is not installed; action-self-test.yml runs this gate in CI.")
+        }
+        return URL(fileURLWithPath: path)
     }
 }
