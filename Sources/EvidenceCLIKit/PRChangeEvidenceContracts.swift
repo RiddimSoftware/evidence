@@ -546,8 +546,12 @@ public struct PRChangeEvidenceFailureSummary: Codable, Equatable {
 public struct PRChangeEvidenceManifest: Codable, Equatable {
     public var prNumber: Int
     public var prURL: String?
+    public var prTitle: String?
+    public var prState: String?
     public var beforeSHA: String
     public var afterSHA: String
+    public var beforeRef: String?
+    public var afterRef: String?
     public var base: PRRevisionMetadata?
     public var head: PRRevisionMetadata?
     public var merge: PRRevisionMetadata?
@@ -561,12 +565,17 @@ public struct PRChangeEvidenceManifest: Codable, Equatable {
     public var startedAt: String
     public var completedAt: String?
     public var failures: [PRChangeEvidenceFailureSummary]
+    public var worktrees: [ComparisonWorktree]
 
     public init(
         prNumber: Int,
         prURL: String? = nil,
+        prTitle: String? = nil,
+        prState: String? = nil,
         beforeSHA: String,
         afterSHA: String,
+        beforeRef: String? = nil,
+        afterRef: String? = nil,
         base: PRRevisionMetadata? = nil,
         head: PRRevisionMetadata? = nil,
         merge: PRRevisionMetadata? = nil,
@@ -579,12 +588,17 @@ public struct PRChangeEvidenceManifest: Codable, Equatable {
         artifacts: [CapturedArtifact],
         startedAt: String,
         completedAt: String? = nil,
-        failures: [PRChangeEvidenceFailureSummary] = []
+        failures: [PRChangeEvidenceFailureSummary] = [],
+        worktrees: [ComparisonWorktree] = []
     ) {
         self.prNumber = prNumber
         self.prURL = prURL
+        self.prTitle = prTitle
+        self.prState = prState
         self.beforeSHA = beforeSHA
         self.afterSHA = afterSHA
+        self.beforeRef = beforeRef
+        self.afterRef = afterRef
         self.base = base
         self.head = head
         self.merge = merge
@@ -598,13 +612,18 @@ public struct PRChangeEvidenceManifest: Codable, Equatable {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.failures = failures
+        self.worktrees = worktrees
     }
 
     private enum CodingKeys: String, CodingKey {
         case prNumber = "pr_number"
         case prURL = "pr_url"
+        case prTitle = "pr_title"
+        case prState = "pr_state"
         case beforeSHA = "before_sha"
         case afterSHA = "after_sha"
+        case beforeRef = "before_ref"
+        case afterRef = "after_ref"
         case base
         case head
         case merge
@@ -618,5 +637,6 @@ public struct PRChangeEvidenceManifest: Codable, Equatable {
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case failures
+        case worktrees
     }
 }

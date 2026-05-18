@@ -22,6 +22,7 @@ It is an open-source Swift package and companion CLI for screenshots, App Store 
 - Swift Package Manager
 - ImageMagick for `resize` and `render-marketing`
 - ffmpeg for `record-preview`
+- GitHub CLI (`gh`) for `capture-pr`
 - Fastlane if a consuming app still uses Fastlane snapshot around the capture workflow
 
 ```sh
@@ -149,6 +150,7 @@ Run the command that matches the workflow:
 ```sh
 evidence capture-screenshots
 evidence capture-evidence --ticket APP-123
+evidence capture-pr --repo RiddimSoftware/app --pr 123 --plan .evidence/pr-home.json --output docs/evidence/pr-123
 evidence resize --input raw.png --target 6.9 --output app-store.png
 evidence record-preview --input capture.mov --output preview.mp4 --trim-start 0 --trim-end 30
 evidence render-marketing --scene scene.json --svg scene.svg --output scene.png
@@ -156,6 +158,8 @@ evidence upload-screenshots --dry-run
 ```
 
 The CLI wraps Xcode simulator tooling, ImageMagick, and ffmpeg with explicit checks so missing local dependencies fail with actionable messages.
+
+`capture-pr` resolves a pull request's before/after revisions and prepares two isolated worktrees under `<output>/worktrees/` without switching the root checkout. For open PRs it uses the current base and head SHAs; for merged PRs it uses the merge commit and its first parent when available. Pass `--before-ref` or `--after-ref` to override either side.
 
 Use raw capture when the screenshot should show the app exactly as it runs. Use `render-marketing` when the App Store asset needs a composed layout with headlines, badges, metrics, timelines, device framing, or source text around app imagery.
 
@@ -260,7 +264,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-The Action accepts a `subcommand` input matching the CLI verb (`capture-screenshots`, `capture-evidence`, `capture-web`, `resize`, `render-marketing`, `record-preview`, `upload-screenshots`) along with passthrough inputs for `config`, `ticket`, `output-dir`, and `extra-args`. Set `comment-on-pr: 'true'` and pass `github-token` to have the Action post a PR comment listing every artifact produced by the run; the comment step is automatically skipped when no token is supplied or when the workflow does not run on a `pull_request` event.
+The Action accepts a `subcommand` input matching the CLI verb (`capture-screenshots`, `capture-evidence`, `capture-pr`, `capture-web`, `resize`, `render-marketing`, `record-preview`, `upload-screenshots`) along with passthrough inputs for `config`, `ticket`, `output-dir`, and `extra-args`. Set `comment-on-pr: 'true'` and pass `github-token` to have the Action post a PR comment listing every artifact produced by the run; the comment step is automatically skipped when no token is supplied or when the workflow does not run on a `pull_request` event.
 
 The `platform` input selects the capture mode: `ios` (default) for iOS simulator captures on macOS runners, or `web` for Playwright Chromium screenshots on any runner (including `ubuntu-latest`). When `platform: web`, Node.js 20 and the Playwright Chromium browser are installed and cached automatically.
 
