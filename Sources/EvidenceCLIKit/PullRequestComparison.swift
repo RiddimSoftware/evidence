@@ -228,6 +228,7 @@ public struct CapturePullRequestEvidence {
     @discardableResult
     public func execute(_ input: CapturePullRequestEvidenceInput) throws -> PRChangeEvidenceManifest {
         try fileManager.createDirectory(at: input.outputDirectory, withIntermediateDirectories: true)
+        let plan = try loadPlan(from: input.planURL)
 
         let resolution = try resolver.execute(
             repo: input.repo,
@@ -240,10 +241,7 @@ public struct CapturePullRequestEvidence {
             outputDirectory: input.outputDirectory
         )
         let timestamp = ISO8601DateFormatter().string(from: clock.now())
-        let plan = fileManager.fileExists(atPath: input.planURL.path)
-            ? try PRChangeEvidencePlan.load(from: input.planURL)
-            : nil
-        let iosSettings = plan?.platform == .ios ? plan?.ios : nil
+        let iosSettings = plan.platform == .ios ? plan.ios : nil
         var revisionBuilds: [RevisionBuildResult] = []
         var simulator: PRChangeEvidenceSimulator?
         var failures: [PRChangeEvidenceFailureSummary] = []
@@ -258,7 +256,7 @@ public struct CapturePullRequestEvidence {
             )
         ]
 
-        if let plan, let ios = iosSettings, let revisionBuilder {
+        if let ios = iosSettings, let revisionBuilder {
             for worktree in worktrees {
                 let phase = PRChangeEvidencePhase(worktree.label)
                 let result = try revisionBuilder.execute(
@@ -303,7 +301,7 @@ public struct CapturePullRequestEvidence {
                     terminalError = CLIError.commandFailed(message)
                 }
             }
-        } else if plan?.platform == .ios, plan?.ios == nil {
+        } else if plan.platform == .ios, plan.ios == nil {
             terminalError = CLIError.config("Invalid PR change evidence plan at \(input.planURL.path): missing required field 'ios' for platform 'ios'.")
             if let terminalError {
                 failures.append(PRChangeEvidenceFailureSummary(message: terminalError.errorDescription ?? String(describing: terminalError)))
@@ -334,7 +332,7 @@ public struct CapturePullRequestEvidence {
             },
             planPath: input.planPath,
             command: manifestCommand(for: input),
-            runnerMode: plan?.runner ?? .xctest,
+            runnerMode: plan.runner,
             simulator: simulator,
             xcodeDestination: iosSettings?.destination,
             buildResult: PRChangeEvidenceBuildResult(
@@ -360,6 +358,13 @@ public struct CapturePullRequestEvidence {
             throw terminalError
         }
         return manifest
+    }
+
+    private func loadPlan(from url: URL) throws -> PRChangeEvidencePlan {
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw CLIError.config("Missing PR change evidence plan at \(url.path).")
+        }
+        return try PRChangeEvidencePlan.load(from: url)
     }
 
     private static func buildFailureMessage(_ result: RevisionBuildResult) -> String {
