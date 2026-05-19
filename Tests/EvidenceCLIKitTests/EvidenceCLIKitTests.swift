@@ -4,6 +4,26 @@ import Foundation
 import XCTest
 
 final class EvidenceCLIKitTests: XCTestCase {
+    func testProcessCommandRunnerDrainsLargeStdoutAndStderrWhileProcessRuns() throws {
+        try XCTSkipUnless(
+            FileManager.default.isExecutableFile(atPath: "/usr/bin/python3"),
+            "python3 is not available"
+        )
+        let script = """
+        import sys
+        sys.stdout.write("out" * 100000)
+        sys.stdout.flush()
+        sys.stderr.write("err" * 100000)
+        sys.stderr.flush()
+        """
+
+        let result = try ProcessCommandRunner().run("/usr/bin/python3", ["-c", script])
+
+        XCTAssertEqual(result.exitCode, 0)
+        XCTAssertEqual(result.stdout.count, 300_000)
+        XCTAssertEqual(result.stderr.count, 300_000)
+    }
+
     func testConfigParsingRequiresNamedFields() throws {
         let document = try TOMLDocument.parse("""
         scheme = "Example"

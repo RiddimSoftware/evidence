@@ -65,13 +65,50 @@ public struct ProcessCommandRunner: CommandRunning {
         process.standardOutput = stdout
         process.standardError = stderr
 
+        var stdoutData = Data()
+        var stderrData = Data()
+        let stdoutLock = NSLock()
+        let stderrLock = NSLock()
+
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            stdoutLock.lock()
+            stdoutData.append(data)
+            stdoutLock.unlock()
+        }
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            stderrLock.lock()
+            stderrData.append(data)
+            stderrLock.unlock()
+        }
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+        }
+
         try process.run()
         process.waitUntilExit()
 
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        let remainingStdout = stdout.fileHandleForReading.readDataToEndOfFile()
+        let remainingStderr = stderr.fileHandleForReading.readDataToEndOfFile()
+        stdoutLock.lock()
+        stdoutData.append(remainingStdout)
+        let finalStdout = stdoutData
+        stdoutLock.unlock()
+        stderrLock.lock()
+        stderrData.append(remainingStderr)
+        let finalStderr = stderrData
+        stderrLock.unlock()
+
         return CommandResult(
             exitCode: process.terminationStatus,
-            stdout: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
-            stderr: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            stdout: String(data: finalStdout, encoding: .utf8) ?? "",
+            stderr: String(data: finalStderr, encoding: .utf8) ?? ""
         )
     }
 }

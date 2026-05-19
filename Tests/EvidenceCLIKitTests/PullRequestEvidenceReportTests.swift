@@ -113,6 +113,30 @@ final class PullRequestEvidenceReportTests: XCTestCase {
         XCTAssertTrue(report.markdown.contains("- Overall status: **failed**"))
     }
 
+    func testRendererNamesMissingWholeFlowVideoWhenPlanVideoIsEnabled() throws {
+        let output = try outputDirectory()
+        var manifest = successfulManifest(output: output)
+        manifest.artifacts = manifest.artifacts.filter { artifact in
+            artifact.kind != .video || artifact.phase == .before
+        }
+
+        var plan = comparisonPlan()
+        plan.video = PRChangeEvidenceVideo(enabled: true, name: "home-flow")
+        plan.steps = [
+            PRChangeEvidenceStep(name: "Launch app", kind: .launch),
+            PRChangeEvidenceStep(name: "Home screen", kind: .screenshot, path: "home.png")
+        ]
+
+        let report = try RenderPullRequestEvidenceReport(
+            comparisonRenderer: RecordingComparisonImageRenderer(),
+            fileManager: .default
+        ).writeReport(manifest: manifest, plan: plan, outputDirectory: output)
+
+        XCTAssertTrue(report.markdown.contains("### Missing After Artifact"))
+        XCTAssertTrue(report.markdown.contains("home-flow: expected `after/home-flow.mov`"))
+        XCTAssertTrue(report.markdown.contains("- Overall status: **partial**"))
+    }
+
     func testRendererNamesBuildFailureAndReportOnlyPartialOutputWithoutRawLogs() throws {
         let output = try outputDirectory()
         var manifest = successfulManifest(output: output)

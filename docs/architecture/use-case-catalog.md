@@ -146,9 +146,11 @@ screenshot/openURL adapter, simctl video recorder, filesystem artifact writer.
 Current implementation: `Sources/EvidenceCLIKit/EvidencePlanExecution.swift`
 dispatches `runner = "xctest"` to revision-scoped `xcodebuild test` calls with
 Evidence environment values, and `runner = "simctl"` to launch/wait/screenshot
-and video steps. `CapturePullRequestEvidence` records returned artifacts and
-step results in `manifest.json`; `EvidenceCLI.swift` remains a thin command
-router.
+and video steps. Video artifacts are validated for presence and non-zero file
+size before they are added to the manifest; missing or empty recordings are
+returned as capture failures. `CapturePullRequestEvidence` records returned
+artifacts and step results in `manifest.json`; `EvidenceCLI.swift` remains a
+thin command router.
 
 ### RenderPullRequestEvidenceReport
 

@@ -314,6 +314,58 @@ final class IOSRevisionAdaptersTests: XCTestCase {
         ])
     }
 
+    func testSimctlPlanExecutorFailsWhenDeclaredWholeFlowVideoIsMissing() throws {
+        let directory = try temporaryDirectory()
+        let output = directory.appendingPathComponent("proof/pr-55", isDirectory: true)
+        let plan = PRChangeEvidencePlan(
+            repo: "RiddimSoftware/example",
+            pr: 55,
+            platform: .ios,
+            runner: .simctl,
+            ios: PRChangeEvidenceIOSSettings(
+                scheme: "Example",
+                bundleID: "com.example.app",
+                simulatorUDID: "SIM-123"
+            ),
+            steps: [
+                PRChangeEvidenceStep(name: "launch app", kind: .launch),
+                PRChangeEvidenceStep(name: "settle", kind: .wait, seconds: 0),
+                PRChangeEvidenceStep(name: "capture home", kind: .screenshot, path: "home.png")
+            ],
+            video: PRChangeEvidenceVideo(enabled: true, name: "home-flow")
+        )
+        let simulator = FakeSimulatorController()
+        let videoRecorder = FakeVideoRecorder(missingOutputPhases: [.after])
+        let executor = SimctlPlanExecutor(
+            simulator: simulator,
+            videoRecorder: videoRecorder,
+            artifactWriter: FileArtifactWriter(),
+            clock: IOSFixedEvidenceClock(date: Date(timeIntervalSince1970: 1_714_000_000))
+        )
+
+        let result = try executor.execute(EvidencePlanExecutionRequest(
+            plan: plan,
+            planURL: directory.appendingPathComponent(".evidence/pr-home.json"),
+            outputDirectory: output,
+            worktrees: [
+                ComparisonWorktree(label: .before, sha: "before", path: directory.appendingPathComponent("before-worktree").path),
+                ComparisonWorktree(label: .after, sha: "after", path: directory.appendingPathComponent("after-worktree").path)
+            ],
+            revisionBuilds: [
+                revisionBuild(.before, output: output),
+                revisionBuild(.after, output: output)
+            ],
+            ios: plan.ios!,
+            launch: plan.launch
+        ))
+
+        XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(result.artifacts.filter { $0.kind == .video }.map(\.phase), [.before])
+        XCTAssertTrue(result.failures.contains { $0.message.contains("after") && $0.message.contains("home-flow.mov") })
+        XCTAssertEqual(result.stepResults.last?.phase, .after)
+        XCTAssertEqual(result.stepResults.last?.status, .failed)
+    }
+
     func testCapturePRBuildsBothRevisionsWithIsolatedDerivedDataAndManifestRecords() throws {
         let directory = try temporaryDirectory()
         let output = directory.appendingPathComponent("proof/pr-44", isDirectory: true)
@@ -860,6 +912,11 @@ private final class FakeSimulatorController: SimulatorControlling {
 private final class FakeVideoRecorder: VideoRecording {
     private(set) var startedPaths: [String] = []
     private(set) var stoppedPaths: [String] = []
+    var missingOutputPhases: Set<PRChangeEvidencePhase>
+
+    init(missingOutputPhases: Set<PRChangeEvidencePhase> = []) {
+        self.missingOutputPhases = missingOutputPhases
+    }
 
     func start(udid: String, outputURL: URL) throws -> VideoRecordingSession {
         startedPaths.append(outputURL.path)
@@ -868,8 +925,15 @@ private final class FakeVideoRecorder: VideoRecording {
 
     func stop(_ session: VideoRecordingSession) throws {
         stoppedPaths.append(session.outputPath)
+        if missingOutputPhases.contains(phase(forArtifactPath: session.outputPath)) {
+            return
+        }
         let url = URL(fileURLWithPath: session.outputPath)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("mov".utf8).write(to: url)
+    }
+
+    private func phase(forArtifactPath path: String) -> PRChangeEvidencePhase {
+        path.contains("/after/") ? .after : .before
     }
 }
