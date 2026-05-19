@@ -236,15 +236,36 @@ public struct XcodeTestPlanExecutor: EvidencePlanExecuting {
         guard let session, let videoPlan else { return nil }
         try videoRecorder.stop(session)
         let timestamp = timestamp()
-        result.artifacts.append(artifactWriter.artifact(
+        let artifact = try videoArtifact(
             kind: .video,
             phase: phase,
             path: session.outputPath,
             stepName: videoPlan.artifactStepName,
             mediaType: mediaType(for: URL(fileURLWithPath: session.outputPath)),
             capturedAt: timestamp
-        ))
+        )
+        result.artifacts.append(artifact)
         return session.outputPath
+    }
+
+    private func videoArtifact(
+        kind: CapturedArtifact.Kind,
+        phase: PRChangeEvidencePhase,
+        path: String,
+        stepName: String,
+        mediaType: String,
+        capturedAt: String
+    ) throws -> CapturedArtifact {
+        let artifact = artifactWriter.artifact(
+            kind: kind,
+            phase: phase,
+            path: path,
+            stepName: stepName,
+            mediaType: mediaType,
+            capturedAt: capturedAt
+        )
+        try validateVideoArtifact(artifact, phase: phase)
+        return artifact
     }
 
     private func artifactPath(
@@ -373,7 +394,7 @@ public final class SimctlVideoRecorder: VideoRecording {
     public func stop(_ session: VideoRecordingSession) throws {
         guard let process = session.process else { return }
         if process.isRunning {
-            process.terminate()
+            process.interrupt()
         }
         process.waitUntilExit()
     }
@@ -440,25 +461,27 @@ public struct SimctlPlanExecutor: EvidencePlanExecuting {
                 didLaunch = true
             }
 
-            func finishActiveVideo(recordingStepName: String? = nil, capturedAt: String? = nil) {
+            func finishActiveVideo(recordingStepName: String? = nil, capturedAt: String? = nil) throws {
                 if let session = activeVideo {
-                    try? videoRecorder.stop(session)
+                    try videoRecorder.stop(session)
                     activeVideo = nil
                     if let recordingStepName, let capturedAt {
-                        result.artifacts.append(artifactWriter.artifact(
+                        let artifact = artifactWriter.artifact(
                             kind: .video,
                             phase: build.phase,
                             path: session.outputPath,
                             stepName: recordingStepName,
                             mediaType: mediaType(for: URL(fileURLWithPath: session.outputPath)),
                             capturedAt: capturedAt
-                        ))
+                        )
+                        try validateVideoArtifact(artifact, phase: build.phase)
+                        result.artifacts.append(artifact)
                     }
                 }
             }
 
             defer {
-                finishActiveVideo()
+                try? finishActiveVideo()
                 try? simulator.terminate(bundleID: bundleID, selection: selection)
             }
 
@@ -487,14 +510,16 @@ public struct SimctlPlanExecutor: EvidencePlanExecuting {
                     if shouldRecordWholeFlow, step == steps.last, let session = activeVideo {
                         try videoRecorder.stop(session)
                         activeVideo = nil
-                        result.artifacts.append(artifactWriter.artifact(
+                        let artifact = artifactWriter.artifact(
                             kind: .video,
                             phase: build.phase,
                             path: session.outputPath,
                             stepName: request.plan.video.name?.nonEmpty ?? "flow",
                             mediaType: mediaType(for: URL(fileURLWithPath: session.outputPath)),
                             capturedAt: completedAt
-                        ))
+                        )
+                        try validateVideoArtifact(artifact, phase: build.phase)
+                        result.artifacts.append(artifact)
                     }
                     result.stepResults.append(CaptureStepResult(
                         phase: build.phase,
@@ -515,18 +540,20 @@ public struct SimctlPlanExecutor: EvidencePlanExecuting {
                             capturedAt: completedAt
                         ))
                     } else if step.kind == .stopVideo, let artifactPath {
-                        result.artifacts.append(artifactWriter.artifact(
+                        let artifact = artifactWriter.artifact(
                             kind: .video,
                             phase: build.phase,
                             path: artifactPath,
                             stepName: step.name,
                             mediaType: mediaType(for: URL(fileURLWithPath: artifactPath)),
                             capturedAt: completedAt
-                        ))
+                        )
+                        try validateVideoArtifact(artifact, phase: build.phase)
+                        result.artifacts.append(artifact)
                     }
                 } catch let error as CLIError {
                     let completedAt = timestamp()
-                    finishActiveVideo(recordingStepName: step.name, capturedAt: completedAt)
+                    try? finishActiveVideo(recordingStepName: step.name, capturedAt: completedAt)
                     let message = "\(build.phase.rawValue) step '\(step.name)' failed. \(error.errorDescription ?? String(describing: error))"
                     result.failures.append(PRChangeEvidenceFailureSummary(stepName: step.name, message: message))
                     result.stepResults.append(CaptureStepResult(
@@ -541,7 +568,7 @@ public struct SimctlPlanExecutor: EvidencePlanExecuting {
                     return result
                 } catch {
                     let completedAt = timestamp()
-                    finishActiveVideo(recordingStepName: step.name, capturedAt: completedAt)
+                    try? finishActiveVideo(recordingStepName: step.name, capturedAt: completedAt)
                     let message = "\(build.phase.rawValue) step '\(step.name)' failed. \(String(describing: error))"
                     result.failures.append(PRChangeEvidenceFailureSummary(stepName: step.name, message: message))
                     result.stepResults.append(CaptureStepResult(
@@ -766,6 +793,16 @@ private func mediaType(for url: URL) -> String {
         return "video/quicktime"
     default:
         return "application/octet-stream"
+    }
+}
+
+private func validateVideoArtifact(
+    _ artifact: CapturedArtifact,
+    phase: PRChangeEvidencePhase
+) throws {
+    guard artifact.kind == .video else { return }
+    guard let fileSize = artifact.fileSize, fileSize > 0 else {
+        throw CLIError.commandFailed("\(phase.rawValue) video artifact missing or empty: \(artifact.path)")
     }
 }
 

@@ -547,7 +547,7 @@ public struct RenderPullRequestEvidenceReport: PullRequestEvidenceReporting {
         outputDirectory: URL
     ) -> [ReportFailureSection] {
         var sections: [ReportFailureSection] = []
-        let mediaSteps = plan.steps.filter { $0.kind == .screenshot || $0.kind == .stopVideo }
+        let mediaSteps = expectedMediaSteps(in: plan)
 
         let missingBefore = missingArtifacts(
             phase: .before,
@@ -740,7 +740,7 @@ public struct RenderPullRequestEvidenceReport: PullRequestEvidenceReporting {
         plan: PRChangeEvidencePlan,
         manifest: PRChangeEvidenceManifest
     ) -> Bool {
-        for step in plan.steps where step.kind == .screenshot || step.kind == .stopVideo {
+        for step in expectedMediaSteps(in: plan) {
             let kind: CapturedArtifact.Kind = step.kind == .screenshot ? .screenshot : .video
             if artifact(kind: kind, phase: .before, stepName: step.name, manifest: manifest) == nil
                 || artifact(kind: kind, phase: .after, stepName: step.name, manifest: manifest) == nil {
@@ -748,6 +748,16 @@ public struct RenderPullRequestEvidenceReport: PullRequestEvidenceReporting {
             }
         }
         return false
+    }
+
+    private func expectedMediaSteps(in plan: PRChangeEvidencePlan) -> [PRChangeEvidenceStep] {
+        var mediaSteps = plan.steps.filter { $0.kind == .screenshot || $0.kind == .stopVideo }
+        if plan.video.enabled,
+           !plan.steps.contains(where: { $0.kind == .startVideo || $0.kind == .stopVideo }) {
+            let name = plan.video.name?.nonEmpty ?? "flow"
+            mediaSteps.append(PRChangeEvidenceStep(name: name, kind: .stopVideo, path: "\(name).mov"))
+        }
+        return mediaSteps
     }
 
     private func shortSHA(_ sha: String) -> String {
